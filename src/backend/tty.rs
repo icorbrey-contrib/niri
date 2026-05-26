@@ -1399,7 +1399,18 @@ impl Tty {
         // Filter out the CCS modifiers as they have increased bandwidth, causing some monitor
         // configurations to stop working.
         //
-        // For display only devices, restrict to linear buffers for best compatibility.
+        // Previously this code path additionally restricted display-only devices (those that
+        // fall back to the primary GPU's renderer) to Modifier::Linear, originally for
+        // DisplayLink compatibility. That filter excludes everything the renderer can actually
+        // produce against a DRM plane that has no IN_FORMATS blob (treated by Smithay as
+        // accepting only Modifier::Invalid), since Mesa's dmabuf_render_formats() doesn't emit
+        // an Invalid-modifier entry to bridge the gap. The result is NoSupportedPlaneFormat on
+        // every connector of the secondary device. virtio-gpu's primary plane on aarch64 is one
+        // such legacy plane and is the motivating case for removing the filter.
+        //
+        // The full CCS-filtered set is what the primary device already uses successfully against
+        // the same plane structure, so applying it uniformly to display-only devices lets
+        // Smithay's negotiation find a compatible buffer format the same way.
         //
         // The invalid modifier attempt below should make this unnecessary in some cases, but it
         // would still be a bad idea to remove this until Smithay has some kind of full-device
@@ -1409,10 +1420,6 @@ impl Tty {
             .iter()
             .copied()
             .filter(|format| {
-                if device.render_node.is_none() {
-                    return format.modifier == Modifier::Linear;
-                }
-
                 let is_ccs = matches!(
                     format.modifier,
                     Modifier::I915_y_tiled_ccs
